@@ -1,2 +1,4 @@
-# simplistic.rabbitMQ_sca
-scanning test codeQL
+jso.camp2014.simplistic.rabbitMQ.jca.poc
+========================================
+
+A very simplistic wildfly/rabbit/rar PoC - it just works (non-production code)
