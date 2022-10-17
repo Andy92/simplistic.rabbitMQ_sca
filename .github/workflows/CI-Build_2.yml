@@ -1,0 +1,85 @@
+# This workflow will build a Java project with Maven, and cache/restore any dependencies to improve the workflow execution time
+# For more information see: https://help.github.com/actions/language-and-framework-guides/building-and-testing-java-with-maven
+
+name: Java CI with Maven
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up JDK 11
+      uses: actions/setup-java@v2
+      with:
+        java-version: '11'
+        distribution: 'adopt'
+        cache: maven
+    - name: Build with Maven
+      run: mvn -B package --file pom.xml
+    
+    - name: git-bash
+      # You may pin to the exact commit or the version.
+      run: |
+          echo 'Setting domain IP'
+          sudo echo "${{ secrets.PUBLIC_IP_VM }} fortify.cyberxdemo.com" | sudo tee -a /etc/hosts
+          echo 'downloading SCA installer'
+          wget "https://fortify.cyberxdemo.com:8443/ssc/downloads/Fortify_SCA_and_Apps_22.1.0_linux_x64.run"
+          wget "https://fortify.cyberxdemo.com:8443/ssc/downloads/fortify.license"
+          ls -l
+          chmod +x "Fortify_SCA_and_Apps_22.1.0_linux_x64.run"
+          
+          install_dir="/opt/Fortify/Fortify_SCA_and_Apps_22.1.0"
+          ./Fortify_SCA_and_Apps_22.1.0_linux_x64.run --fortify_license_path ./fortify.license --mode unattended
+          pwd
+          # find / -name fortifyupdate*
+          ls -l
+          export PATH=$PATH:/home/runner/Fortify/Fortify_SCA_and_Apps_22.1.0/bin
+          fortifyupdate
+          
+          sourceanalyzer -b github-java-build -clean
+          sourceanalyzer -b github-java-build -source 1.8 -cp "./**/*.jar" "./**/*.java" "./**/*.js" "./**/*.jsp" "./**/*.html" "./**/*.properties" "./**/*.xml"
+          sourceanalyzer -b github-java-build -scan -f github-sast-report.fpr
+          fortifyclient -url https://fortify.cyberxdemo.com:8443/ssc -authtoken ${{ secrets.AuthToken }} -application "${{ secrets.ApplicationName }}" -applicationVersion "${{ secrets.ApplicationVersion }}" uploadFPR -file github-sast-report.fpr
+
+    - name: Upload a Build Artifact
+      uses: actions/upload-artifact@v2.2.4
+      with:
+        # Artifact name
+        name: fortify-report-artifact
+        # A file, directory or wildcard pattern that describes what to upload
+        path: ./github-sast-report.fpr
+
+    - name: Generate Fortify Report
+      #uses: docker://fortifydocker/fortify-vulnerability-exporter:latest
+      #with:
+      run: |
+          echo 'Setting domain IP'
+          sudo echo "${{ secrets.PUBLIC_IP_VM }} fortify.cyberxdemo.com" | sudo tee -a /etc/hosts
+          wget -nv https://github.com/fortify/FortifyVulnerabilityExporter/releases/download/v1.5.2/FortifyVulnerabilityExporter.zip
+          mkdir -p $HOME/Fortify
+          unzip FortifyVulnerabilityExporter.zip -d "$HOME/Fortify/"
+          echo $PATH
+          export PATH=$PATH:$HOME/Fortify/
+          echo $PATH
+          FORTIFY_BIN_JAR=$HOME/Fortify/FortifyVulnerabilityExporter.jar
+          java -jar $FORTIFY_BIN_JAR SSCToGitHub --ssc.baseUrl=https://fortify.cyberxdemo.com:8443/ssc --ssc.user=sscadmin --ssc.password=${{ secrets.SSCPW }} --ssc.version.name=${{ secrets.ApplicationName }}:${{ secrets.ApplicationVersion }} --csv.fields.severity='$[vuln.severity]' --csv.fields.friority='$[vuln.friority]' --csv.output.header=true "--csv.filter.expressions=vuln.friority matches 'Critical|High'"
+
+    # Uploaded the generated file containing Fortify vulnerabilities to GitHub.
+    - uses: github/codeql-action/upload-sarif@v1
+      with:
+        sarif_file: ./gh-fortify-sast.sarif
+
+    # Optionally store the generated file for troubleshooting purposes.
+    - uses: actions/upload-artifact@v2
+      if: always()
+      with:
+        name: sarif-files
+        path: ./gh-fortify-sast.sarif 
